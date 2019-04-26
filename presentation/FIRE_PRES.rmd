@@ -1,0 +1,176 @@
+---
+title: "U.S. Wildfires from 1992-2015"
+author: "Andrew Nolan"
+date: "4/25/2019"
+output:
+  slidy_presentation: default
+  ioslides_presentation: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+```{r,message=FALSE}
+library(RSQLite)
+library(tidyverse)
+
+connection <- dbConnect(SQLite(), '../data/FPA_FOD_20170508.sqlite')
+
+fires <- tbl(connection, "Fires") %>% collect()
+
+dbDisconnect(connection)
+```
+
+## Data Set Overview  
+- Spatial Wildfire Occurrence Data for the United States, 1992-2015 provided by the U.S. Forest Service  
+  - Data was accessed as SQL Database provided from [Kaggle](https://www.kaggle.com/rtatman/188-million-us-wildfires)  
+- Contains ~1.88 million recorded wildfires with 40 variables recorded for each fire  
+```{r}
+glimpse(fires)
+```
+
+## Exploratory Data Analysis  
+### Fires with Time (1992-2015)
+```{r, out.width='50%', fig.show='hold'}
+fires %>% group_by(FIRE_YEAR) %>% summarize(n = n()) %>%
+  ggplot(aes(x = FIRE_YEAR, y = n)) + geom_bar(stat = 'identity', fill = 'slateblue4') +
+  geom_smooth(method = 'lm', se = FALSE, linetype = 'dashed') + 
+  labs(x = 'Year', y = 'Number of Fires')
+fires %>% mutate(date_ymd = as.Date(DISCOVERY_DATE - 2458598.5, origin = '2019-04-25')) %>%
+  group_by(date_ymd) %>% summarise(n = n()) %>% 
+  ggplot(aes(x = date_ymd, y = n)) + geom_line(color = 'slateblue4') + 
+  labs(x = 'Day of Year', y = 'Number of Fires')
+```  
+
+
+## Exploratory Data Analysis  
+### Fires by Size Class
+```{r, fig.align='center'}
+fires %>% group_by(FIRE_SIZE_CLASS) %>%
+  summarize(n = n()) %>% 
+  mutate( FIRE_SIZE_CLASS = recode(FIRE_SIZE_CLASS, 'A'='0-0.25', 'B'='0.26-9.9', 'C'='10.0-99.9', 
+                                   'D'='100-299', 'E'='300-999', 'F'='1000-4999', 'G'='5000+')) %>%
+  ggplot(aes( x= FIRE_SIZE_CLASS, y = n)) + geom_bar(stat = 'identity', fill = 'slateblue4') + 
+  labs(x = 'Size (acres)', y = 'Number of Fires')
+```
+
+
+## Exploratory Data Analysis  
+### Fires by Cause
+```{r,out.width = '30%', fig.show='hold'}
+fires %>% group_by(STAT_CAUSE_DESCR) %>% 
+  summarize(n = n()) %>%
+  ggplot(aes( x = reorder(STAT_CAUSE_DESCR, n), y = n)) + geom_bar(stat='identity', fill='slateblue4') + 
+  coord_flip() + labs( x= '', y = 'Number of Fires', title = 'Count')
+fires %>% group_by(STAT_CAUSE_DESCR) %>%
+  summarize(n = mean(FIRE_SIZE, na.rm = TRUE)) %>%
+  ggplot(aes( x = reorder(STAT_CAUSE_DESCR, n), y = n)) + geom_bar(stat='identity', fill='slateblue4') + 
+  coord_flip() + labs( x= '', y = 'Burn Area (Acres)', title = 'Burn Area')
+
+fires %>% group_by(STAT_CAUSE_DESCR) %>% mutate(BURN_TIME = CONT_DATE - DISCOVERY_DATE) %>%
+  summarize(n = mean(BURN_TIME, na.rm = TRUE)) %>%
+  ggplot( aes( x = reorder(STAT_CAUSE_DESCR, n), y = n)) + geom_bar(stat='identity', fill='slateblue4') + 
+  coord_flip() + labs( x= '', y = 'Burn Time (days)', title = 'Burn Time ')
+
+```  
+
+## Exploratory Data Analysis  
+### Spatial Distribution of Fires
+
+```{r, message=FALSE,fig.align='center'}
+library(maps)
+library(mapdata)
+library(ggthemes)
+
+if ("DC" %in% state.abb == FALSE){
+  state.abb <- append(state.abb, c("DC", "PR"))
+  state.name <- append(state.name, c("District of Columbia", "Puerto Rico"))
+  }
+
+fires <- fires %>% mutate(region = map_chr(STATE, function(x) {tolower(state.name[grep(x, state.abb)])}))
+
+roi <- map_data('state')
+
+state.x77 <- state.x77 %>% as.data.frame() %>% mutate(region = tolower(rownames(state.x77)))
+
+fires %>% 
+  group_by(region) %>% summarise(n = n()) %>% left_join(state.x77, 'region') %>%
+  mutate(fires_sqm = n/Area) %>% right_join(roi, by ='region')%>%
+  ggplot(aes(x = long, y = lat, group = group, fill = fires_sqm)) + geom_polygon() +
+  geom_path(color = 'white') +
+  scale_fill_continuous(low = "slateblue1",
+                          high = "slateblue4",
+                          name = 'Fires per sqm') +
+    theme_map() +
+    coord_map('albers', lat0=30, lat1=40) +
+    ggtitle("Wildfires from 1992-2015") +
+    theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+## Exploratory Data Analysis  
+### Spatial Distribution of Fires in Maine
+
+```{r, fig.align='center'}
+roi2 <- map_data('county', c('maine')) %>% as.data.frame()
+
+fires %>% filter(region == 'maine') %>% group_by(region, subregion = tolower(FIPS_NAME)) %>%
+  summarize(n = n()) %>% right_join(roi2, by = c('region', 'subregion')) %>%
+  ggplot(aes(x = long, y = lat, group = group, fill = n)) + 
+    geom_polygon() + 
+    geom_path(color = 'white', size = 0.1) +
+  scale_fill_continuous(low = "slateblue1",
+                          high = "slateblue4",
+                          name = 'Number of fires') +
+    theme_map() +
+    coord_map('albers', lat0=30, lat1=40) +
+    ggtitle("Wildfires from 1992-2015 for Maine") +
+    theme(plot.title = element_text(hjust = 0.5), legend.position = c(1, 0.6))
+```
+
+## Exploratory Data Analysis  
+### Fires by Cause in Maine
+
+```{r,out.width = '30%', fig.show='hold'}
+fires %>% filter(region == 'maine') %>% group_by(STAT_CAUSE_DESCR) %>% summarize(n = n()) %>%
+  ggplot(aes( x = reorder(STAT_CAUSE_DESCR, n), y = n)) + geom_bar(stat='identity', fill='slateblue4') + 
+  coord_flip() + labs( x= '', y = 'Number of Fires', title = 'Cause')
+
+fires %>% filter(region == 'maine') %>% group_by(STAT_CAUSE_DESCR) %>% 
+  summarize(n = mean(FIRE_SIZE, na.rm = TRUE)) %>%
+  ggplot(aes( x = reorder(STAT_CAUSE_DESCR, n), y = n)) + geom_bar(stat='identity', fill='slateblue4') + 
+  coord_flip() + labs( x= '', y = 'Burn Area (acres)', title = 'Size')
+
+fires %>% filter(region == 'maine') %>% group_by(STAT_CAUSE_DESCR) %>% 
+  mutate(BURN_TIME = CONT_DATE - DISCOVERY_DATE) %>%
+  summarize(n = mean(BURN_TIME, na.rm = TRUE)) %>%
+  ggplot(aes( x = reorder(STAT_CAUSE_DESCR, n), y = n)) + geom_bar(stat='identity', fill='slateblue4') + 
+  coord_flip() + labs( x= '', y = 'Burn Time (days)', title = 'Burn Time')
+
+```
+
+
+## Prediction 
+### To Do  
+- Based on the size, time, & location of a wildfire can I predict the cause? 
+```{r}
+fires %>% select(STAT_CAUSE_CODE, STAT_CAUSE_DESCR) %>% glimpse()
+```
+
+- Will need to subsample the data since it's 1.88 million observations  
+  - Looking to start 10% (~188,000), depending on runtime looking to up to 25% (~500,000)  
+  
+- Since this multiclass classification problem I will be looking to use:
+  - KNN, trees, random forest, & xgboost  
+
+- Tentatively, I am looking to use:  
+  - Area, Year, Fire Day of Year, Burn Time, Lat/Long  
+
+```{r}
+fires %>% mutate(BURN_TIME = CONT_DATE - DISCOVERY_DATE) %>% 
+  select(FIRE_YEAR, DISCOVERY_DOY, FIRE_SIZE, LATITUDE, LONGITUDE, BURN_TIME ) %>% 
+  glimpse()
+```
+<!-- - Since this dataset is so large, I won't be able to process all of it in series, therefor may consider investigating how to implement some of the aforementioned models in parallel  -->
