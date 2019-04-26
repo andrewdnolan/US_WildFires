@@ -5,6 +5,9 @@ date: "4/25/2019"
 output: html_document
 ---
 
+Need to looking into doing some basic time series analysis with the dataset. A starting point would 
+be spectral analysis to isolate seasonal signal, from trensds, from noise, as demonstrated 
+[here](https://anomaly.io/seasonal-trend-decomposition-in-r/).
 ```{r,message=FALSE}
 library(RSQLite)
 library(tidyverse)
