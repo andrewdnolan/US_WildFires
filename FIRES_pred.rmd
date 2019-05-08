@@ -112,7 +112,8 @@ tree_pred %>% count(STAT_CAUSE_DESCR, EstCODE) %>% spread(STAT_CAUSE_DESCR,n)
 confusion_matrix(tree_pred$STAT_CAUSE_DESCR, tree_pred$EstCODE) 
 ```
 
-### Bagging 
+### Bagging
+
 ```{r, message=FALSE}
 library(randomForest)
 
