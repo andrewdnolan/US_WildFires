@@ -34,8 +34,18 @@ fires <- fires %>% mutate(BURN_TIME = CONT_DATE - DISCOVERY_DATE)
 The original data set contains 1.88 million entires, which is too many to process on my personal machine. In order to efficently process that much data we would need to do our processing on multiple nodes of a high power computing resources, which is outside of the scope of this class. We will investiagte processing in parallel if and when possible, but for the bulk of this analysis this is outside the scope. Instead we are going to subset our data to 15% is orginal size (300,000 observations)
 
 ```{r}
-fires_no_nan <- fires %>% drop_na(STAT_CAUSE_DESCR, FIRE_YEAR, DISCOVERY_DOY, FIRE_SIZE, LATITUDE, LONGITUDE, BURN_TIME)
+library(glmnet)
+fires_no_nan <- fires %>% drop_na(c(STAT_CAUSE_DESCR, FIRE_YEAR, DISCOVERY_DOY, FIRE_SIZE, LATITUDE, LONGITUDE, BURN_TIME))
 
+fires_no_nan <- fires_no_nan %>% select( - c(OBJECTID, FOD_ID, FPA_ID, SOURCE_SYSTEM_TYPE, NWCG_REPORTING_AGENCY, NWCG_REPORTING_UNIT_NAME, 
+               SOURCE_REPORTING_UNIT_NAME, ICS_209_INCIDENT_NUMBER, ICS_209_NAME, MTBS_ID, MTBS_FIRE_NAME, 
+              COMPLEX_NAME) )  %>% data.frame()
+
+fires_no_nan <- data.frame(fires_no_nan) %>% select(-Shape)
+
+x <- model.matrix(STAT_CAUSE_CODE~., fires_no_nan)
+```
+```{r}
 fires_no_nan <- fires_no_nan %>% select(STAT_CAUSE_DESCR, FIRE_YEAR, DISCOVERY_DOY, FIRE_SIZE, LATITUDE, LONGITUDE, BURN_TIME )
 
 fires_no_nan <- fires_no_nan %>% mutate(STAT_CAUSE_DESCR = as_factor(STAT_CAUSE_DESCR))
