@@ -222,6 +222,9 @@ svm_predict <- test_set15 %>% mutate(EstCODE = predict(svm_fit, test_set15))
 
 mean(svm_predict$EstCODE != svm_predict$STAT_CAUSE_DESCR)
 
+
+confusion_matrix(predicted = svm_predict$EstCODE, validation = svm_predict$STAT_CAUSE_DESCR)
+
 ```
 
 
