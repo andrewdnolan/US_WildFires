@@ -1,0 +1,212 @@
+---
+title: "US Fires Predictions"
+author: "Andrew Nolan"
+date: "5/7/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+We have done our inital exploratory data analysis in the `FIRE_EDA` notebook. Here we are going to use the information that we gleamed from that to do some modeling. First thing first we are going to try and predict the cause of a wildfire based on the size, burn time, location, and the time that it occured.   
+
+## Reading in the Data
+In order to access the data we need to connect to the `SQL` database, but since the file fits in RAM we are gonna disconnect from the database and leave the dataset in memoroy rather than running queries against the database to preform our analysis.
+```{r,message=FALSE}
+library(RSQLite)
+library(tidyverse)
+
+connection <- dbConnect(SQLite(), './data/FPA_FOD_20170508.sqlite')
+fires <- tbl(connection, "Fires") %>% collect()
+dbDisconnect(connection)
+#write.csv(fires, file = "./data/FPA_FOD_20170508.csv")
+```
+
+## Data Cleaning / Splitting
+
+We are given infromation about the date the fire was identified (`DISCOVERY_DATE`) and the date the fire was contained (`CONT_DATE`) from those two dates we can calculate the time that the fire burned. `DISCOVERY_DATE` & `CONT_DATE` are provided as julian dates, so when we difference the two numbers we are given the fire burn time in days. 
+
+```{r}
+fires <- fires %>% mutate(BURN_TIME = CONT_DATE - DISCOVERY_DATE) 
+```
+
+The original data set contains 1.88 million entires, which is too many to process on my personal machine. In order to efficently process that much data we would need to do our processing on multiple nodes of a high power computing resources, which is outside of the scope of this class. We will investiagte processing in parallel if and when possible, but for the bulk of this analysis this is outside the scope. Instead we are going to subset our data to 15% is orginal size (300,000 observations)
+
+```{r}
+fires_no_nan <- fires %>% drop_na(STAT_CAUSE_DESCR, FIRE_YEAR, DISCOVERY_DOY, FIRE_SIZE, LATITUDE, LONGITUDE, BURN_TIME)
+
+fires_no_nan <- fires_no_nan %>% select(STAT_CAUSE_DESCR, FIRE_YEAR, DISCOVERY_DOY, FIRE_SIZE, LATITUDE, LONGITUDE, BURN_TIME )
+
+fires_no_nan <- fires_no_nan %>% mutate(STAT_CAUSE_DESCR = as_factor(STAT_CAUSE_DESCR))
+
+set.seed(111)
+
+subset_rp <- modelr::resample_partition(fires_no_nan, c(subset=0.05, nonused=0.95))
+
+subset_fires_15 <- as_tibble(subset_rp$subset)
+```
+
+
+```{r}
+set.seed(111)
+rp <- modelr::resample_partition(subset_fires_15, c(train=0.7, test=0.3))
+train_set15 <- as_tibble(rp$train)
+test_set15 <- as_tibble(rp$test)
+```
+
+## Modeling
+
+```{r}
+confusion_matrix <- function(predicted, validation){
+  
+table(validation, predicted) %>% prop.table(margin = 1) %>% as.data.frame.matrix() %>% 
+    rownames_to_column(var = 'actual') %>% gather(key = 'prediction', value = 'freq',-actual) %>% replace_na(list(freq = 0)) %>%
+    ggplot(aes(x = actual, y = prediction, fill = freq)) +
+    geom_tile() + geom_text(aes(label = round(freq, 3)), size = 3, color = 'gray20') +
+    scale_fill_gradient(low = 'orange', high = 'red', limits = c(0,1), name = 'Relative Frequency') +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    ggtitle('Confusion Matrix')
+
+}
+
+
+importance_plot <- function(fit, dataset, response){
+  
+  bagging_import <- tibble(
+  var = dataset %>% select(-response) %>% names(), 
+  import = c(fit$importance))
+
+  ggplot(bagging_import, aes(x = reorder(var, import), y = import, fill = import)) +
+    geom_bar(stat="identity", position="dodge")+ coord_flip() +
+    ylab("Variable Importance")+
+    xlab("") +
+    guides(fill=F) +
+    ggtitle("Information Value Summary")+
+    scale_fill_continuous(low="lightblue", high="blue") + theme(plot.title = element_text(hjust = 0.5))
+}
+```
+
+### A Simple tree approach
+
+```{r, message=FALSE}
+library(tree)
+library(tidymodels)
+set.seed(111)
+
+tree_fit <- tree(STAT_CAUSE_DESCR ~ ., data = train_set15)
+
+plot(tree_fit, type = "uniform")
+text(tree_fit, pretty = 1, all = TRUE, cex = 0.7)
+
+test_set15 %>% modelr::add_predictions(tree_fit, type = "class") %>%
+    accuracy(STAT_CAUSE_DESCR, pred)
+```
+
+```{r}
+tree_pred <- test_set15 %>% modelr::add_predictions(tree_fit, type = "class", var = 'EstCODE')
+tree_pred %>% count(STAT_CAUSE_DESCR, EstCODE) %>% spread(STAT_CAUSE_DESCR,n)
+```
+
+```{r}
+confusion_matrix(tree_pred$STAT_CAUSE_DESCR, tree_pred$EstCODE) 
+```
+
+### Bagging 
+```{r, message=FALSE}
+library(randomForest)
+
+set.seed(111)
+
+bagging_fit <- randomForest(STAT_CAUSE_DESCR~., train_set15, mtry = 6)
+bagging_pred <- test_set15 %>% mutate(EstCODE = predict(bagging_fit, test_set15, type = 'class'))
+
+#Calculate the test error rate
+mean(test_set15$STAT_CAUSE_DESCR != bagging_pred$EstCODE)
+
+importance_plot(fit = bagging_fit, dataset = train_set15, response = 'STAT_CAUSE_DESCR')
+
+confusion_matrix(validation = bagging_pred$STAT_CAUSE_DESCR, predicted = bagging_pred$EstCODE )
+```
+
+### Random Forest
+
+```{r}
+set.seed(111)
+
+forest_mtry <- tibble(mtry = numeric(), err=numeric())
+
+for (i in seq(1, 6,1)){
+  rand_for_fit <- randomForest(STAT_CAUSE_DESCR ~., data = train_set15, mtry = i)
+  rand_for_pred <- test_set15 %>% mutate(EstCODE = predict(rand_for_fit, test_set15, type = 'class'))
+  err <- mean(rand_for_pred$STAT_CAUSE_DESCR != rand_for_pred$EstCODE)
+  forest_mtry <- add_row(forest_mtry, mtry = i, err = err)
+}
+
+ggplot(forest_mtry, aes(x = mtry , y = err)) + 
+  geom_point() + geom_line() + 
+  ggtitle("M vs. Testing MSE") + theme(plot.title = element_text(hjust = 0.5))
+
+rand_for_fit <- randomForest(STAT_CAUSE_DESCR ~., data = train_set15, mtry = 4)
+
+importance_plot(fit = rand_for_fit, dataset = train_set15, response = 'STAT_CAUSE_DESCR')
+
+rand_for_pred <- test_set15 %>% mutate(EstCODE = predict(rand_for_fit, test_set15, type = 'class'))
+
+#Calculate the test error rate
+mean(test_set15$STAT_CAUSE_DESCR != rand_for_pred$EstCODE)
+
+confusion_matrix(validation = rand_for_pred$STAT_CAUSE_DESCR, predicted = rand_for_pred$EstCODE )
+```
+
+### Boosting
+```{r, message = FALSE}
+set.seed(111)
+library(gbm)
+
+boost_fit <- gbm(STAT_CAUSE_DESCR ~ ., data= train_set15, n.tree = 100, distribution = 'multinomial', n.cores = 4)
+boost_pred <- predict(boost_fit, test_set15, n.trees = 100, type = 'response') %>% matrix(., ncol = 13, byrow = TRUE) %>% apply(., 1, which.max) - 1L 
+
+
+print(paste("Test error using boosting =", mean(boost_pred !=  test_set15$STAT_CAUSE_DESCR %>% as.numeric())))
+
+confusion_matrix(predicted = boost_pred, validation = test_set15$STAT_CAUSE_DESCR %>% as.numeric())
+
+
+```
+
+
+### Extereme Gradient Boosting
+
+[example of how to do mulitclass classification with xgboost](https://github.com/dmlc/xgboost/blob/master/demo/multiclass_classification/train.R)
+```{r, message=FALSE}
+set.seed(111)
+library(xgboost)
+
+xg_train <- xgb.DMatrix(data = as.matrix(train_set15 %>% select(-STAT_CAUSE_DESCR)), label = train_set15$STAT_CAUSE_DESCR %>% as.numeric() - 1L)
+
+xg_test <- xgb.DMatrix(data = as.matrix(test_set15 %>% select(-STAT_CAUSE_DESCR)), label = test_set15$STAT_CAUSE_DESCR %>% as.numeric() - 1L)
+
+params <- list(
+  objective = 'multi:softmax',
+  num_class = 13,
+  nthread = 4
+)
+
+watchlist = list(train = xg_train, test = xg_test)
+
+xgboost_fit <- xgb.train(
+  params = params,
+  data = xg_train,
+  watchlist = watchlist,
+  nrounds = 100
+)
+
+pred <- predict(xgboost_fit, xg_test)
+error_rate <- sum(pred != test_set15$STAT_CAUSE_DESCR %>% as.numeric() - 1L) / length(test_set15$STAT_CAUSE_DESCR %>% as.numeric())
+print(paste("Test error using softmax =", error_rate))
+
+confusion_matrix(predicted = pred, validation = test_set15$STAT_CAUSE_DESCR %>% as.numeric())
+
+```
+
