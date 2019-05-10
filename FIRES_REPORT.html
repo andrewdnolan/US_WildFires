@@ -31203,7 +31203,16 @@ CPw/Bv8fo+4vt6kAAAAASUVORK5CYII="
 <div class="cell border-box-sizing text_cell rendered"><div class="prompt input_prompt">
 </div><div class="inner_cell">
 <div class="text_cell_render border-box-sizing rendered_html">
-<h2 id="Disscusion-/-Conclusions-">Disscusion / Conclusions <a class="anchor" id="wrap_up" /><a class="anchor-link" href="#Disscusion-/-Conclusions-">&#182;</a></h2><p>Here we have used a dataset provided by the U.S. Forest Service to predict the cuase of a wildfires.</p>
+<h2 id="Disscusion-/-Conclusions-">Disscusion / Conclusions <a class="anchor" id="wrap_up" /><a class="anchor-link" href="#Disscusion-/-Conclusions-">&#182;</a></h2><p>Here we have used a dataset provided by the U.S. Forest Service hosted on <a href="https://www.kaggle.com/rtatman/188-million-us-wildfires">Kaggle</a> to try and predict the cause of a wildfire based on it's location, seasonality, size, and burn time. The original database contained 1.88 million records, but after data cleaning we subseted the data to a chunk of ~80,000 observations. We then split the data set into training and testing sets (70/30) which were used to fit our models. For our multiclass classification analysis we used tree, baggin, random forest, gradeint boosting, extereme gradient boosting, and support vector machines. Random forest with $m$ = 4 and extreme gradient boosting results in the best missclassification rates of ~38%. We consitently between all the models an ability to predict with relative accuracy the cause of wildfire if it fall into one of the large classes such as <code>Lightning</code>, <code>Debris Burning</code>, or <code>Arson</code>, and inability from any of the models to accurately predict the less frequent classses such as <code>Campfire</code>, <code>Children</code>, or <code>Railroad</code>. In order to obtain better classification rates it may useful in the future to generate a training set that contains roughly equal protions of all the cause classes insteas of randomly generating one and not controlling for it. Multiple of the models used above identified <code>Longitude</code> and <code>Lattitude</code> to be the most important predicors in the respective models. This represent a major flaw in our anaylsis since we treated <code>Longitude</code> and <code>Lattitude</code> as numeric values and did not account for any linear or more complex relationship between the two variables. Implementation of some basic spatial anlysis techniques would help to adress these flaws in the analysis.</p>
+<p>In order to generate a more accurate, and therefore more useful multiclass classfication model we need:</p>
+<ul>
+<li>to be able to process more the actual dataset wihtout having to downsample  </li>
+<li>create a more representative trainset with an equal distribution of all the classes, instead of one biased by more frequent classes  </li>
+<li>implement spatial analysis methods to deal with the spatial domain of this problem  </li>
+<li>more fine tunning of paramters in the choosen models to be able to mimize missclassification rates </li>
+<li>explor more complex models such as nueral networks </li>
+</ul>
+<p>The analysis presented here represent an inital step in a much longer and more complicated picture. If what was set out do here was acutally able to be done in a reprodubale and scalable manner, it would have signifcant impact in the modern world.</p>
 
 </div>
 </div>
